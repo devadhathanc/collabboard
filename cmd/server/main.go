@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/devadhathan/collabboard/internal/auth"
 	"github.com/devadhathan/collabboard/internal/board"
 	"github.com/devadhathan/collabboard/internal/config"
 	"github.com/devadhathan/collabboard/internal/db"
@@ -36,13 +37,38 @@ func main() {
 
 	hub := ws.NewHub(rc)
 
+	refreshStore := db.NewRefreshTokenStore(pool)
+	denylist := auth.NewRedisDenylist(rc.Raw())
+	authSvc, err := auth.NewService(
+		time.Duration(cfg.Auth.AccessTokenTTL)*time.Second,
+		refreshStore,
+		denylist,
+	)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+
+	auditLogger := auth.NewAuditLogger(pool)
+	rateLimiter := auth.NewRateLimiter(rc.Raw(), cfg.Auth.RateLimitPerIP, cfg.Auth.RateLimitPerAcct)
+
 	taskRepo := db.NewTaskRepo(pool)
 	boardSvc := board.NewService(taskRepo, rc)
 	boardHandler := board.NewHandler(boardSvc, hub, rc)
 
+	authMW := auth.Middleware(authSvc)
+	auditMW := auth.AuditMiddleware(auditLogger)
+	rlMW := rateLimiter.Middleware(false)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", ws.ServeWS(hub))
-	boardHandler.RegisterRoutes(mux)
+
+	auth.NewHandler(authSvc).RegisterRoutes(mux)
+	mux.HandleFunc("GET /ws", ws.ServeWS(hub))
+
+	protected := http.NewServeMux()
+	protected.HandleFunc("POST /boards/{boardID}/tasks", boardHandler.CreateTask)
+	protected.HandleFunc("GET /boards/{boardID}/tasks/{taskID}", boardHandler.GetTask)
+
+	mux.Handle("/boards/", rlMW(auditMW(authMW(protected))))
 
 	addr := cfg.Server.Host + ":" + strconv.Itoa(cfg.Server.Port)
 	srv := &http.Server{

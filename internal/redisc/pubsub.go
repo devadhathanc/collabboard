@@ -64,6 +64,10 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 	return c.rdb.Get(ctx, key).Result()
 }
 
+func (c *Client) Raw() *redis.Client {
+	return c.rdb
+}
+
 func BoardChannel(boardID string) string {
 	return "board:" + boardID
 }
