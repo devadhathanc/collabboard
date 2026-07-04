@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -12,9 +13,12 @@ import (
 
 	"github.com/devadhathan/collabboard/internal/auth"
 	"github.com/devadhathan/collabboard/internal/board"
+	"github.com/devadhathan/collabboard/internal/cache"
 	"github.com/devadhathan/collabboard/internal/config"
 	"github.com/devadhathan/collabboard/internal/db"
+	"github.com/devadhathan/collabboard/internal/middleware"
 	"github.com/devadhathan/collabboard/internal/redisc"
+	"github.com/devadhathan/collabboard/internal/search"
 	"github.com/devadhathan/collabboard/internal/ws"
 )
 
@@ -55,9 +59,8 @@ func main() {
 	boardSvc := board.NewService(taskRepo, rc)
 	boardHandler := board.NewHandler(boardSvc, hub)
 
-	authMW := auth.Middleware(authSvc)
-	auditMW := auth.AuditMiddleware(auditLogger)
-	rlMW := rateLimiter.Middleware(false)
+	searchSvc := search.NewService(pool)
+	cacheSvc := cache.NewService(rc.Raw())
 
 	mux := http.NewServeMux()
 
@@ -66,8 +69,45 @@ func main() {
 
 	protected := http.NewServeMux()
 	boardHandler.RegisterRoutes(protected)
+	protected.HandleFunc("GET /boards/{boardID}/search", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
+		boardID := r.PathValue("boardID")
+		claims := auth.GetClaims(r.Context())
 
-	mux.Handle("/boards/", rlMW(auditMW(authMW(protected))))
+		if query == "" {
+			http.Error(w, `{"error":"query required"}`, http.StatusBadRequest)
+			return
+		}
+
+		var results []search.Result
+		cacheKey := cache.BoardTasksCacheKey(boardID)
+		err := cacheSvc.GetOrFetch(r.Context(), cacheKey, 30*time.Second,
+			func() (interface{}, error) {
+				return searchSvc.SearchTasks(r.Context(), boardID, query, claims.UserID)
+			},
+			&results,
+		)
+		if err != nil {
+			http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		jsonEncode(w, results)
+	})
+
+	chain := middleware.RequestID(
+		middleware.StructuredLogging(
+			middleware.MetricsMiddleware(
+				rateLimiter.Middleware(false)(
+					auth.AuditMiddleware(auditLogger)(
+						auth.Middleware(authSvc)(protected),
+					),
+				),
+			),
+		),
+	)
+	mux.Handle("/boards/", chain)
 
 	addr := cfg.Server.Host + ":" + strconv.Itoa(cfg.Server.Port)
 	srv := &http.Server{
@@ -97,4 +137,10 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("forced shutdown: %v", err)
 	}
+}
+
+func jsonEncode(w http.ResponseWriter, v interface{}) {
+	data, _ := json.Marshal(v)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
