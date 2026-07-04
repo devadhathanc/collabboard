@@ -53,7 +53,7 @@ func main() {
 
 	taskRepo := db.NewTaskRepo(pool)
 	boardSvc := board.NewService(taskRepo, rc)
-	boardHandler := board.NewHandler(boardSvc, hub, rc)
+	boardHandler := board.NewHandler(boardSvc, hub)
 
 	authMW := auth.Middleware(authSvc)
 	auditMW := auth.AuditMiddleware(auditLogger)
@@ -65,8 +65,7 @@ func main() {
 	mux.HandleFunc("GET /ws", ws.ServeWS(hub))
 
 	protected := http.NewServeMux()
-	protected.HandleFunc("POST /boards/{boardID}/tasks", boardHandler.CreateTask)
-	protected.HandleFunc("GET /boards/{boardID}/tasks/{taskID}", boardHandler.GetTask)
+	boardHandler.RegisterRoutes(protected)
 
 	mux.Handle("/boards/", rlMW(auditMW(authMW(protected))))
 

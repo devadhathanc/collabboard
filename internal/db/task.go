@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -44,9 +45,33 @@ func (r *TaskRepo) GetByID(ctx context.Context, id string) (*Task, error) {
 	).Scan(&t.ID, &t.BoardID, &t.Title, &t.Status, &t.AssigneeID, &t.Position,
 		&t.Version, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return t, nil
+}
+
+func (r *TaskRepo) GetByBoardID(ctx context.Context, boardID string) ([]*Task, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, board_id, title, status, assignee_id, position, version, created_at, updated_at
+		 FROM tasks WHERE board_id = $1 ORDER BY position`, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t := &Task{}
+		if err := rows.Scan(&t.ID, &t.BoardID, &t.Title, &t.Status, &t.AssigneeID,
+			&t.Position, &t.Version, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
 }
 
 func (r *TaskRepo) UpdateWithVersion(ctx context.Context, t *Task, expectedVersion int) (bool, error) {
@@ -60,5 +85,10 @@ func (r *TaskRepo) UpdateWithVersion(ctx context.Context, t *Task, expectedVersi
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() == 1, nil
+	if tag.RowsAffected() == 1 {
+		t.Version = expectedVersion + 1
+		t.UpdatedAt = time.Now().UTC()
+		return true, nil
+	}
+	return false, nil
 }
