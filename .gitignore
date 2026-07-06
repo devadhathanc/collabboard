@@ -1,0 +1,11 @@
+.env
+.env.*
+node_modules/
+build/
+dist/
+*.pem
+*.key
+*.cert
+tmp/
+.DS_Store
+vendor/
