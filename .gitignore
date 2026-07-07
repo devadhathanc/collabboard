@@ -9,3 +9,8 @@ dist/
 tmp/
 .DS_Store
 vendor/
+
+# ML Models — too large for git
+models/
+*.gguf
+*.safetensors

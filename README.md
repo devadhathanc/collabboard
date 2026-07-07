@@ -1,72 +1,128 @@
 # IdeaBoard
 
-IdeaBoard is a real-time collaborative brainstorming application. It features a Go backend with WebSocket support for live updates and a React (Vite) frontend. Additionally, it integrates with the Gemini API to intelligently synthesize and generate new ideas based on the current board content.
+IdeaBoard is a real-time collaborative brainstorming application. It features a Go backend with WebSocket support for live updates and a React (Vite) frontend. It uses a **locally fine-tuned AI model** running via [Ollama](https://ollama.com) to intelligently synthesize and suggest new ideas — **no internet or API key required**.
 
 ## Features
 
-- **Real-Time Collaboration**: Ideas are instantly broadcasted to all connected clients using WebSockets.
-- **AI Synthesis**: Leverages Google's Gemini API to brainstorm and suggest up to 3 new related ideas based on what's already on the board.
-- **RESTful API**: Manage boards and ideas via simple HTTP endpoints.
-- **Modern Frontend**: Built with React, TypeScript, and Vite for a fast and responsive user experience.
-- **Go Backend**: High-performance backend using Go and `gorilla/websocket`.
+- **Real-Time Collaboration** — Ideas are instantly broadcasted to all connected clients using WebSockets.
+- **Offline AI Synthesis** — Uses a fine-tuned Gemma 2B model (via Ollama) to brainstorm and suggest up to 3 new related ideas based on what's already on the board. No cloud API needed.
+- **RESTful API** — Manage boards and ideas via simple HTTP endpoints.
+- **Modern Frontend** — Built with React, TypeScript, and Vite.
+- **Go Backend** — High-performance backend using Go and `gorilla/websocket`.
 
 ## Project Structure
 
-- `/`: Go backend (main server, handlers, WebSocket hub, and Gemini integration).
-- `/client`: React frontend built with Vite.
+```
+ideaboard/
+├── main.go              # Server entrypoint
+├── board/               # In-memory board & idea store
+├── handlers/            # REST API handlers
+├── ollama/              # Local AI client (Ollama)
+├── ws/                  # WebSocket hub
+├── client/              # React + Vite frontend
+└── models/              # Local GGUF model files (gitignored)
+    ├── ideaboard-q8.gguf
+    └── Modelfile
+```
 
 ## Prerequisites
 
-- [Go](https://golang.org/) 1.22 or higher
+- [Go](https://golang.org/) 1.22+
 - [Node.js](https://nodejs.org/) (for the frontend)
-- A Gemini API key (for AI synthesis features)
+- [Ollama](https://ollama.com/download) (for local AI synthesis)
 
 ## Setup & Running
 
-### Backend
+### 1. Install Ollama
 
-1. Navigate to the root directory.
-2. Create a `.env` file and add your Gemini API key:
-   ```env
-   GEMINI_API_KEY=your_api_key_here
-   PORT=8090
-   ```
-3. Install dependencies:
-   ```bash
-   go mod tidy
-   ```
-4. Run the server:
-   ```bash
-   go run main.go
-   ```
-   The backend will start on `http://localhost:8090`.
+```bash
+brew install ollama
+```
 
-### Frontend
+### 2. Load the Fine-Tuned Model
 
-1. Navigate to the `client` directory:
-   ```bash
-   cd client
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
+Place the `ideaboard-q8.gguf` file inside the `models/` directory, then run:
+
+```bash
+cd models/
+ollama create ideaboard -f Modelfile
+```
+
+### 3. Start Ollama
+
+```bash
+ollama serve
+```
+
+### 4. Backend
+
+From the project root:
+
+```bash
+go mod tidy
+go run main.go
+```
+
+The backend will start on `http://localhost:8090`. You should see:
+
+```
+[ollama] connected — using local model "ideaboard"
+IdeaBoard server listening on :8090
+```
+
+### 5. Frontend
+
+```bash
+cd client
+npm install
+npm run dev
+```
 
 ## API Endpoints
 
-- `GET /health`: Health check endpoint.
-- `GET /api/boards/{boardID}/ideas`: Fetch all ideas for a specific board.
-- `POST /api/boards/{boardID}/ideas`: Submit a new idea.
-  - Body: `{"text": "idea description", "created_by": "username"}`
-- `POST /api/boards/{boardID}/ideas/synthesize`: Trigger AI to brainstorm new ideas based on the board's current content.
-- `GET /ws`: WebSocket endpoint for real-time updates.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/boards/{boardID}/ideas` | List all ideas on a board |
+| `POST` | `/api/boards/{boardID}/ideas` | Submit a new idea |
+| `POST` | `/api/boards/{boardID}/ideas/synthesize` | Trigger AI to suggest 3 new ideas |
+| `GET` | `/ws` | WebSocket for real-time updates |
+
+### Submit Idea — Request Body
+```json
+{ "text": "remote work", "created_by": "username" }
+```
+
+### Synthesize — Example Response
+```json
+{
+  "added": 3,
+  "ideas": [
+    { "text": "Virtual water cooler time", "created_by": "AI" },
+    { "text": "Flexible time zones for global teams", "created_by": "AI" },
+    { "text": "Project management tools for async workflows", "created_by": "AI" }
+  ]
+}
+```
 
 ## WebSocket Events
 
-The WebSocket connection broadcasts events when ideas are added or updated:
-- `IDEA_ADDED`: Dispatched when a new idea is submitted.
-- `IDEA_UPDATED`: Dispatched when an existing idea is modified (e.g., duplicated or merged).
+| Event | Trigger |
+|---|---|
+| `IDEA_ADDED` | A new idea is submitted |
+| `IDEA_UPDATED` | An existing idea is modified |
+
+## AI Model
+
+The synthesis feature runs a **fine-tuned Gemma 2B** model locally via Ollama.
+
+| Property | Detail |
+|---|---|
+| Base model | `google/gemma-2-2b-it` |
+| Fine-tuning | QLoRA on brainstorming datasets (Dolly 15K + DevQuasar brainstorm + custom IdeaBoard examples) |
+| Format | GGUF Q8 (~2.8 GB) |
+| Runtime | Ollama (localhost:11434) |
+| API key needed | ❌ None |
+| Internet needed | ❌ None |
+
+The `gemini/` package acts as a drop-in client — the rest of the codebase is unchanged.

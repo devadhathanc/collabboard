@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"ideaboard/board"
-	"ideaboard/gemini"
+	"ideaboard/ollama"
 	"ideaboard/handlers"
 	"ideaboard/ws"
 )
@@ -20,14 +20,12 @@ func main() {
 	loadEnv(".env")
 
 	port := getEnv("PORT", "8090")
-	geminiKey := getEnv("GEMINI_API_KEY", "")
-
 	store := board.NewStore()
 	hub := ws.NewHub()
-	geminiClient := gemini.NewClient(geminiKey)
+	ollamaClient := ollama.NewClient("")
 
 	ideasH := handlers.NewIdeasHandler(store, hub)
-	synthesizeH := handlers.NewSynthesizeHandler(store, geminiClient, hub)
+	synthesizeH := handlers.NewSynthesizeHandler(store, ollamaClient, hub)
 
 	mux := http.NewServeMux()
 
@@ -57,7 +55,7 @@ func main() {
 	}
 
 	log.Printf("IdeaBoard server listening on :%s", port)
-	log.Printf("Gemini synthesis enabled: %v", geminiClient.Enabled())
+	log.Printf("Ollama synthesis enabled: %v", ollamaClient.Enabled())
 
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)

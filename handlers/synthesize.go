@@ -6,25 +6,25 @@ import (
 	"net/http"
 
 	"ideaboard/board"
-	"ideaboard/gemini"
+	"ideaboard/ollama"
 	"ideaboard/ws"
 )
 
 type SynthesizeHandler struct {
 	store  *board.Store
-	gemini *gemini.Client
+	ollama *ollama.Client
 	hub    *ws.Hub
 }
 
-func NewSynthesizeHandler(store *board.Store, gemini *gemini.Client, hub *ws.Hub) *SynthesizeHandler {
-	return &SynthesizeHandler{store: store, gemini: gemini, hub: hub}
+func NewSynthesizeHandler(store *board.Store, ollama *ollama.Client, hub *ws.Hub) *SynthesizeHandler {
+	return &SynthesizeHandler{store: store, ollama: ollama, hub: hub}
 }
 
 func (h *SynthesizeHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 	boardID := r.PathValue("boardID")
 
-	if !h.gemini.Enabled() {
-		http.Error(w, "Gemini not configured — add GEMINI_API_KEY to .env", http.StatusNotImplemented)
+	if !h.ollama.Enabled() {
+		http.Error(w, "Ollama not running — start with: ollama serve", http.StatusNotImplemented)
 		return
 	}
 
@@ -43,9 +43,9 @@ func (h *SynthesizeHandler) Synthesize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ask Gemini to generate new related ideas.
-	result, err := h.gemini.Synthesize(r.Context(), texts)
+	result, err := h.ollama.Synthesize(r.Context(), texts)
 	if err != nil {
-		log.Printf("[synthesize] gemini error: %v", err)
+		log.Printf("[synthesize] ollama error: %v", err)
 		http.Error(w, "AI brainstorm failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
